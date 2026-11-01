@@ -1017,6 +1017,14 @@ function getPackageImportPaths(
         if (typeof target !== 'string' || !target.startsWith('./')) {
             continue;
         }
+        const segmentsAfterFirst = target.split('/').slice(1);
+        if (
+            segmentsAfterFirst.includes('..') ||
+            segmentsAfterFirst.includes('.') ||
+            segmentsAfterFirst.includes('node_modules')
+        ) {
+            continue;
+        }
         const relativeTarget = path.relative(dir, path.resolve(dir, target));
         if (relativeTarget.startsWith('..') || path.isAbsolute(relativeTarget)) {
             continue;
