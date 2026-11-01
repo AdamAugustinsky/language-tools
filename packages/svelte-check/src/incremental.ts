@@ -443,11 +443,19 @@ export function writeOverlayTsconfig(
         path: toRelativePosix(overlayDir, path.resolve(tsconfigDir, ref.path))
     }));
 
+    const canUsePkgImports = useTsgo || ts.versionMajorMinor?.split('.')[0] === '6';
+    const resolvePackageJsonImports =
+        canUsePkgImports || computeResolvePackageJsonImports(parsed.options);
+
+    const packageImportPaths = resolvePackageJsonImports
+        ? getPackageImportPaths(tsconfigDir, parsed.options.paths)
+        : {};
+
     const rebasedPaths = rebasePathsConfig(
         {
             ...parsed.options,
             paths: {
-                ...getPackageImportPaths(tsconfigDir, parsed.options.paths),
+                ...packageImportPaths,
                 ...parsed.options.paths
             }
         },
@@ -1310,4 +1318,80 @@ function resolveSvelteHtmlTypes(): string | undefined {
     } catch {
         return undefined;
     }
+}
+
+// https://github.com/microsoft/TypeScript/blob/b465fdbfe175304d9b977da137b2c178ae1091d3/src/compiler/utilities.ts#L9041
+function computeResolvePackageJsonImports(options: ts.CompilerOptions): boolean {
+    const moduleResolution = computeModuleResolution6_0(options);
+    if (!moduleResolutionSupportsPackageJsonExportsAndImports(moduleResolution)) {
+        return false;
+    }
+    if (options.resolvePackageJsonImports !== undefined) {
+        return options.resolvePackageJsonImports;
+    }
+    switch (moduleResolution) {
+        case ts.ModuleResolutionKind.Node16:
+        case ts.ModuleResolutionKind.NodeNext:
+        case ts.ModuleResolutionKind.Bundler:
+            return true;
+    }
+    return false;
+}
+
+function computeTarget6_0(options: ts.CompilerOptions): ts.ScriptTarget {
+    if (options.target !== undefined && options.target !== ts.ScriptTarget.ES3) {
+        return options.target;
+    }
+    return ts.ScriptTarget.LatestStandard;
+}
+
+function computeModuleResolution6_0(options: ts.CompilerOptions): ts.ModuleResolutionKind {
+    if (options.moduleResolution !== undefined) {
+        return options.moduleResolution;
+    }
+
+    const moduleKind = computeModuleKind6_0(options);
+    switch (moduleKind) {
+        case ts.ModuleKind.None:
+        case ts.ModuleKind.AMD:
+        case ts.ModuleKind.UMD:
+        case ts.ModuleKind.System:
+            return ts.ModuleResolutionKind.Classic;
+        case ts.ModuleKind.NodeNext:
+            return ts.ModuleResolutionKind.NodeNext;
+    }
+    if (ts.ModuleKind.Node16 <= moduleKind && moduleKind < ts.ModuleKind.NodeNext) {
+        return ts.ModuleResolutionKind.Node16;
+    }
+    return ts.ModuleResolutionKind.Bundler;
+}
+
+function computeModuleKind6_0(options: ts.CompilerOptions): ts.ModuleKind {
+    if (typeof options.module === 'number') {
+        return options.module;
+    }
+    const target = computeTarget6_0(options);
+    if (target === ts.ScriptTarget.ESNext) {
+        return ts.ModuleKind.ESNext;
+    }
+    if (target >= ts.ScriptTarget.ES2022) {
+        return ts.ModuleKind.ES2022;
+    }
+    if (target >= ts.ScriptTarget.ES2020) {
+        return ts.ModuleKind.ES2020;
+    }
+    if (target >= ts.ScriptTarget.ES2015) {
+        return ts.ModuleKind.ES2015;
+    }
+    return ts.ModuleKind.CommonJS;
+}
+
+function moduleResolutionSupportsPackageJsonExportsAndImports(
+    moduleResolution: ts.ModuleResolutionKind
+): boolean {
+    return (
+        (moduleResolution >= ts.ModuleResolutionKind.Node16 &&
+            moduleResolution <= ts.ModuleResolutionKind.NodeNext) ||
+        moduleResolution === ts.ModuleResolutionKind.Bundler
+    );
 }
